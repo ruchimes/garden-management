@@ -63,8 +63,9 @@ async function saveAllToStore<T extends { id: string }>(
 }
 
 // ── Configuración de la nube ──────────────────────────────────────────────────
-
-const CLOUD_KEY = 'huerto-cloud-config'
+// Las credenciales vienen de variables de entorno (Vite las inyecta en build).
+// En Vercel: Settings → Environment Variables
+// En local: crea un fichero .env.local con estas variables
 
 export interface CloudConfig {
   url: string
@@ -73,7 +74,22 @@ export interface CloudConfig {
   enabled: boolean
 }
 
+/** Config inyectada en build desde variables de entorno. Nunca va al repo. */
+export function getEnvCloudConfig(): CloudConfig | null {
+  const url  = import.meta.env.VITE_COUCH_URL  as string | undefined
+  const user = import.meta.env.VITE_COUCH_USER as string | undefined
+  const pass = import.meta.env.VITE_COUCH_PASS as string | undefined
+  if (!url || !user || !pass) return null
+  return { url, username: user, password: pass, enabled: true }
+}
+
+// Mantenemos también la config manual por localStorage para desarrollo local
+const CLOUD_KEY = 'huerto-cloud-config'
+
 export function getCloudConfig(): CloudConfig | null {
+  // Las variables de entorno tienen prioridad sobre la config manual
+  const envConfig = getEnvCloudConfig()
+  if (envConfig) return envConfig
   try {
     const raw = localStorage.getItem(CLOUD_KEY)
     return raw ? JSON.parse(raw) : null
@@ -349,6 +365,14 @@ export const DB = {
     }
     return false
   },
+}
+
+// ── Arranque automático del sync ──────────────────────────────────────────────
+// Si las variables de entorno están configuradas, arranca el sync al cargar.
+const _autoConfig = getEnvCloudConfig()
+if (_autoConfig) {
+  console.info('[DB] Sync automático activado con configuración de entorno.')
+  startSync(_autoConfig)
 }
 
 
