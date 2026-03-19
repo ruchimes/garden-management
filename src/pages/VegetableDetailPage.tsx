@@ -1,5 +1,6 @@
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Sun, Droplets, BarChart3, Clock, Users, Ban } from 'lucide-react'
+import { useState } from 'react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Sun, Droplets, BarChart3, Clock, Users, Ban, Sprout, ChevronDown } from 'lucide-react'
 import { VEGETABLES } from '../data/vegetables'
 import { useAppContext } from '../store/AppContext'
 
@@ -11,8 +12,28 @@ const MONTH_NAMES = [
 export default function VegetableDetailPage() {
   const { vegetableId } = useParams<{ vegetableId: string }>()
   const { state } = useAppContext()
+  const navigate = useNavigate()
   const allVegetables = [...VEGETABLES, ...state.customVegetables]
   const veg = allVegetables.find(v => v.id === vegetableId)
+
+  // Bancales vacíos: huertos × bancales sin cultivo activo
+  const activeCrops = state.plantedCrops.filter(c => c.isActive)
+
+  // Huertos que tienen al menos un bancal libre
+  const gardensWithFreeBeds = state.gardens
+    .map(garden => ({
+      garden,
+      freeBeds: garden.beds
+        .map((bed, idx) => ({ bed, idx }))
+        .filter(({ idx }) => !activeCrops.some(c => c.gardenId === garden.id && c.bedIndex === idx)),
+    }))
+    .filter(({ freeBeds }) => freeBeds.length > 0)
+
+  const [selectedGardenId, setSelectedGardenId] = useState<string>(
+    gardensWithFreeBeds[0]?.garden.id ?? ''
+  )
+  const selectedGardenFreeBeds = gardensWithFreeBeds.find(g => g.garden.id === selectedGardenId)?.freeBeds ?? []
+  const [selectedBedIdx, setSelectedBedIdx] = useState<number>(selectedGardenFreeBeds[0]?.idx ?? 0)
 
   if (!veg) {
     return (
@@ -205,6 +226,78 @@ export default function VegetableDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Cultivar ahora */}
+      {gardensWithFreeBeds.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-green-200 p-4 md:p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+            <Sprout size={18} className="text-green-600" /> Cultivar ahora
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Elige dónde plantar {veg.name}:
+          </p>
+          <div className="space-y-3">
+            {/* Selector de huerto */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                Huerto
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedGardenId}
+                  onChange={e => {
+                    const newGardenId = e.target.value
+                    setSelectedGardenId(newGardenId)
+                    const newFreeBeds = gardensWithFreeBeds.find(g => g.garden.id === newGardenId)?.freeBeds ?? []
+                    setSelectedBedIdx(newFreeBeds[0]?.idx ?? 0)
+                  }}
+                  className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-2.5 text-sm pr-8 focus:ring-2 focus:ring-green-500 outline-none bg-white"
+                >
+                  {gardensWithFreeBeds.map(({ garden, freeBeds }) => (
+                    <option key={garden.id} value={garden.id}>
+                      {garden.name} · {freeBeds.length} bancal{freeBeds.length > 1 ? 'es libres' : ' libre'}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Selector de bancal */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                Bancal
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedBedIdx}
+                  onChange={e => setSelectedBedIdx(Number(e.target.value))}
+                  className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-2.5 text-sm pr-8 focus:ring-2 focus:ring-green-500 outline-none bg-white"
+                >
+                  {selectedGardenFreeBeds.map(({ bed, idx }) => (
+                    <option key={idx} value={idx}>
+                      {bed.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Botón */}
+            <button
+              onClick={() => {
+                navigate(`/gardens/${selectedGardenId}`, {
+                  state: { openPlantForm: true, bedIndex: selectedBedIdx, vegetableId: veg.id },
+                })
+              }}
+              className="w-full flex items-center justify-center gap-2 bg-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-green-700 transition-colors"
+            >
+              <Sprout size={15} /> Plantar aquí
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tips */}
       <div className="bg-green-50 rounded-xl border border-green-200 p-4 md:p-6">

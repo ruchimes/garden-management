@@ -5,8 +5,8 @@
  *
  * Arquitectura:
  *   ┌─────────────┐        ┌─────────────────┐        ┌──────────────┐
- *   │  AppContext  │ ←────→ │   database.ts   │ ←────→ │  CouchDB /   │
- *   │  (React)    │        │  idb (IndexedDB) │  sync  │  Cloudant    │
+ *   │  AppContext │ ←────→ │   database.ts   │ ←────→ │  CouchDB /   │
+ *   │  (React)    │        │  idb (IndexedDB)│  sync  │  Cloudant    │
  *   └─────────────┘        └─────────────────┘        └──────────────┘
  */
 

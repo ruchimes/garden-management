@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useLocation } from 'react-router-dom'
 import { ArrowLeft, Plus, ChevronRight, StickyNote } from 'lucide-react'
 import { useAppContext } from '../store/AppContext'
 import { VEGETABLES, GROWTH_STAGES, getRotationRecommendation } from '../data/vegetables'
@@ -9,12 +9,14 @@ import type { CropFamily, GrowthStage } from '../types'
 export default function GardenDetailPage() {
   const { gardenId } = useParams<{ gardenId: string }>()
   const { state, dispatch } = useAppContext()
+  const location = useLocation()
+  const navState = location.state as { openPlantForm?: boolean; bedIndex?: number; vegetableId?: string } | null
   const garden = state.gardens.find(g => g.id === gardenId)
   const allVegetables = [...VEGETABLES, ...state.customVegetables]
 
-  const [selectedBedIndex, setSelectedBedIndex] = useState<number | null>(null)
-  const [showPlantForm, setShowPlantForm] = useState(false)
-  const [selectedVegetableId, setSelectedVegetableId] = useState('')
+  const [selectedBedIndex, setSelectedBedIndex] = useState<number | null>(navState?.bedIndex ?? null)
+  const [showPlantForm, setShowPlantForm] = useState(navState?.openPlantForm ?? false)
+  const [selectedVegetableId, setSelectedVegetableId] = useState(navState?.vegetableId ?? '')
   const [quantity, setQuantity] = useState(1)
   const [showCropDetail, setShowCropDetail] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
@@ -110,34 +112,47 @@ export default function GardenDetailPage() {
           <h2 className="text-lg font-bold text-gray-800">🌾 Bancales</h2>
           <button
             onClick={() => {
-              setSelectedBedIndex(0)
+              if (selectedBedIndex === null) setSelectedBedIndex(0)
               setShowPlantForm(true)
             }}
             className="inline-flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
           >
             <Plus size={14} />
-            Plantar
+            {selectedBedIndex !== null
+              ? `Plantar en ${garden.beds[selectedBedIndex]?.name}`
+              : 'Plantar'}
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {garden.beds.map((bed, idx) => {
             const bedCrops = activeCrops.filter(c => c.bedIndex === idx)
+            const isEmpty = bedCrops.length === 0
             return (
               <div
                 key={bed.id || idx}
                 className={`border-2 rounded-xl p-3 cursor-pointer transition-all ${
                   selectedBedIndex === idx
                     ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200 bg-gray-50 hover:border-green-300'
+                    : isEmpty
+                      ? 'border-dashed border-gray-300 bg-gray-50 hover:border-green-400 hover:bg-green-50'
+                      : 'border-gray-200 bg-gray-50 hover:border-green-300'
                 }`}
-                onClick={() => setSelectedBedIndex(idx)}
+                onClick={() => {
+                  setSelectedBedIndex(idx)
+                  if (isEmpty) {
+                    setShowPlantForm(true)
+                  }
+                }}
               >
                 <h3 className="font-semibold text-sm text-gray-700 mb-2">
                   {bed.name}
                 </h3>
                 {bedCrops.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">Sin cultivos</p>
+                  <div className="flex flex-col items-center justify-center py-3 gap-1 text-gray-400">
+                    <Plus size={18} className="text-gray-300" />
+                    <p className="text-xs italic">Toca para plantar</p>
+                  </div>
                 ) : (
                   <div className="space-y-1.5">
                     {bedCrops.map(crop => {
