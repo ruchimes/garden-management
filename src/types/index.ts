@@ -93,9 +93,24 @@ export interface Notification {
   type: 'stage_change' | 'reminder' | 'rotation_warning' | 'companion_tip'
 }
 
+export type TransplantDestination =
+  | 'bancal'          // trasplante directo a bancal
+  | 'maceta-mayor'    // primero a maceta más grande antes del bancal
+  | 'siembra-directa' // no necesita semillero, se siembra directamente
+
+export interface Seedling {
+  id: string
+  vegetableId: string
+  quantity: number
+  sowDate: string    // ISO — fecha de siembra en semillero
+  notes: string
+  isActive: boolean
+}
+
 export interface AppState {
   gardens: Garden[]
   plantedCrops: PlantedCrop[]
   notifications: Notification[]
   customVegetables: Vegetable[]
+  seedlings: Seedling[]
 }

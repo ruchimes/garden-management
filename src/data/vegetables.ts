@@ -1,4 +1,4 @@
-import type { Vegetable, StageInfo } from '../types'
+import type { Vegetable, StageInfo, TransplantDestination } from '../types'
 
 export const GROWTH_STAGES: StageInfo[] = [
   {
@@ -511,4 +511,32 @@ export function getRotationRecommendation(previousFamilies: CropFamily[]): CropF
   // Recommend the next group in rotation
   const nextGroupIndex = (currentGroupIndex + 1) % CROP_ROTATION_ORDER.length
   return CROP_ROTATION_ORDER[nextGroupIndex]
+}
+
+// ── Semillero helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Determina si una planta necesita semillero o puede sembrarse directamente.
+ * Las plantas con daysToTransplant === 0 se siembran directo al bancal.
+ */
+export function needsSeedling(veg: Vegetable): boolean {
+  return veg.daysToTransplant > 0
+}
+
+/**
+ * Indica el destino óptimo del trasplante del semillero.
+ * - Solanáceas y cucurbitáceas grandes → maceta mayor antes del bancal
+ * - Resto con semillero → bancal directo
+ * - Sin semillero → siembra directa
+ */
+export function getTransplantDestination(veg: Vegetable): TransplantDestination {
+  if (veg.daysToTransplant === 0) return 'siembra-directa'
+  const intermediateFamilies = ['solanáceas', 'cucurbitáceas']
+  if (intermediateFamilies.includes(veg.family)) return 'maceta-mayor'
+  return 'bancal'
+}
+
+/** Días totales desde siembra en semillero hasta que está listo para trasplantar */
+export function daysUntilTransplantReady(veg: Vegetable): number {
+  return veg.daysToGerminate + veg.daysToTransplant
 }

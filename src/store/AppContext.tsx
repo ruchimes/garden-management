@@ -9,6 +9,7 @@ import type {
   GrowthStage,
   StageRecord,
   Vegetable,
+  Seedling,
 } from '../types'
 import { VEGETABLES, GROWTH_STAGES } from '../data/vegetables'
 import { DB } from '../db/database'
@@ -31,6 +32,19 @@ type Action =
   | { type: 'CHECK_STAGE_TRANSITIONS' }
   | { type: 'ADD_CUSTOM_VEGETABLE'; payload: Vegetable }
   | { type: 'DELETE_CUSTOM_VEGETABLE'; payload: string }
+  // ── Semillero ────────────────────────────────────────────────────────────
+  | { type: 'ADD_SEEDLING'; payload: Omit<Seedling, 'id' | 'isActive'> }
+  | { type: 'REMOVE_SEEDLING'; payload: string }
+  | { type: 'UPDATE_SEEDLING_NOTES'; payload: { seedlingId: string; notes: string } }
+  | {
+      type: 'TRANSPLANT_SEEDLING'
+      payload: {
+        seedlingId: string
+        gardenId: string
+        bedIndex: number
+        quantity?: number
+      }
+    }
 
 
 const initialState: AppState = {
@@ -38,6 +52,7 @@ const initialState: AppState = {
   plantedCrops: [],
   notifications: [],
   customVegetables: [],
+  seedlings: [],
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,6 +81,7 @@ function appReducer(state: AppState, action: Action): AppState {
         ...initialState,
         ...action.payload,
         customVegetables: action.payload.customVegetables ?? [],
+        seedlings: action.payload.seedlings ?? [],
       }
 
     case 'ADD_GARDEN': {
@@ -317,6 +333,109 @@ function appReducer(state: AppState, action: Action): AppState {
         ...state,
         customVegetables: state.customVegetables.filter(v => v.id !== action.payload),
       }
+
+    // ── Semillero ──────────────────────────────────────────────────────────
+
+    case 'ADD_SEEDLING': {
+      const newSeedling: Seedling = {
+        ...action.payload,
+        id: uuidv4(),
+        isActive: true,
+      }
+      const veg = [...VEGETABLES, ...(state.customVegetables ?? [])].find(
+        v => v.id === action.payload.vegetableId
+      )
+      const notification: Notification = {
+        id: uuidv4(),
+        plantedCropId: newSeedling.id,
+        gardenId: '',
+        title: `🌱 Semilla sembrada en semillero`,
+        message: `Has sembrado ${action.payload.quantity} ${veg?.name ?? 'plantas'} en el semillero.`,
+        date: new Date().toISOString(),
+        read: false,
+        type: 'stage_change',
+      }
+      return {
+        ...state,
+        seedlings: [...state.seedlings, newSeedling],
+        notifications: [notification, ...state.notifications],
+      }
+    }
+
+    case 'REMOVE_SEEDLING':
+      return {
+        ...state,
+        seedlings: state.seedlings.map(s =>
+          s.id === action.payload ? { ...s, isActive: false } : s
+        ),
+      }
+
+    case 'UPDATE_SEEDLING_NOTES':
+      return {
+        ...state,
+        seedlings: state.seedlings.map(s =>
+          s.id === action.payload.seedlingId
+            ? { ...s, notes: action.payload.notes }
+            : s
+        ),
+      }
+
+    case 'TRANSPLANT_SEEDLING': {
+      const seedling = state.seedlings.find(s => s.id === action.payload.seedlingId)
+      if (!seedling) return state
+
+      const veg = [...VEGETABLES, ...(state.customVegetables ?? [])].find(
+        v => v.id === seedling.vegetableId
+      )
+
+      // Create PlantedCrop starting at 'trasplante' stage
+      const newCrop: PlantedCrop = {
+        id: uuidv4(),
+        vegetableId: seedling.vegetableId,
+        gardenId: action.payload.gardenId,
+        bedIndex: action.payload.bedIndex,
+        plantedDate: seedling.sowDate,
+        currentStage: 'trasplante' as GrowthStage,
+        stageHistory: [
+          { stage: 'semillero' as GrowthStage, date: seedling.sowDate },
+          { stage: 'trasplante' as GrowthStage, date: new Date().toISOString() },
+        ],
+        notes: seedling.notes,
+        quantity: action.payload.quantity ?? seedling.quantity,
+        isActive: true,
+      }
+
+      // Update bed history
+      const updatedGardens = state.gardens.map(g => {
+        if (g.id !== action.payload.gardenId) return g
+        const beds = g.beds.map((b, idx) => {
+          if (idx !== action.payload.bedIndex) return b
+          return { ...b, cropHistory: [...b.cropHistory, seedling.vegetableId] }
+        })
+        return { ...g, beds }
+      })
+
+      const notification: Notification = {
+        id: uuidv4(),
+        plantedCropId: newCrop.id,
+        gardenId: action.payload.gardenId,
+        title: `🪴 ${veg?.icon} Trasplante realizado`,
+        message: `${veg?.name ?? 'Planta'} trasplantada del semillero al bancal.`,
+        date: new Date().toISOString(),
+        read: false,
+        type: 'stage_change',
+      }
+
+      return {
+        ...state,
+        seedlings: state.seedlings.map(s =>
+          s.id === action.payload.seedlingId ? { ...s, isActive: false } : s
+        ),
+        plantedCrops: [...state.plantedCrops, newCrop],
+        gardens: updatedGardens,
+        notifications: [notification, ...state.notifications],
+      }
+    }
 
     default:
       return state

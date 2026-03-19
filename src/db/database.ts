@@ -11,18 +11,19 @@
  */
 
 import { openDB, type IDBPDatabase } from 'idb'
-import type { Garden, PlantedCrop, Notification, Vegetable } from '../types'
+import type { Garden, PlantedCrop, Notification, Vegetable, Seedling } from '../types'
 
 // ── Schema de IndexedDB ───────────────────────────────────────────────────────
 
 const DB_NAME = 'huerto-app'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 interface HuertoDB {
   gardens: Garden
   crops: PlantedCrop
   notifications: Notification
   customVegetables: Vegetable
+  seedlings: Seedling
 }
 
 let _db: IDBPDatabase<HuertoDB> | null = null
@@ -39,6 +40,8 @@ async function getDB(): Promise<IDBPDatabase<HuertoDB>> {
         db.createObjectStore('notifications', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('customVegetables'))
         db.createObjectStore('customVegetables', { keyPath: 'id' })
+      if (!db.objectStoreNames.contains('seedlings'))
+        db.createObjectStore('seedlings', { keyPath: 'id' })
     },
   })
   return _db
@@ -145,6 +148,7 @@ const COUCH_STORES: Array<{ store: keyof HuertoDB; loadKey: string; dbName: stri
   { store: 'crops',            loadKey: 'plantedCrops',     dbName: 'huerto_crops' },
   { store: 'notifications',    loadKey: 'notifications',    dbName: 'huerto_notifications' },
   { store: 'customVegetables', loadKey: 'customVegetables', dbName: 'huerto_vegetables' },
+  { store: 'seedlings',        loadKey: 'seedlings',        dbName: 'huerto_seedlings' },
 ]
 
 function couchHeaders(config: CloudConfig): HeadersInit {
@@ -289,13 +293,14 @@ export function stopSync(): void {
 
 export const DB = {
   async loadAll() {
-    const [gardens, plantedCrops, notifications, customVegetables] = await Promise.all([
+    const [gardens, plantedCrops, notifications, customVegetables, seedlings] = await Promise.all([
       getAllFromStore<Garden>('gardens'),
       getAllFromStore<PlantedCrop>('crops'),
       getAllFromStore<Notification>('notifications'),
       getAllFromStore<Vegetable>('customVegetables'),
+      getAllFromStore<Seedling>('seedlings'),
     ])
-    return { gardens, plantedCrops, notifications, customVegetables }
+    return { gardens, plantedCrops, notifications, customVegetables, seedlings }
   },
 
   async saveAll(state: {
@@ -303,12 +308,14 @@ export const DB = {
     plantedCrops: PlantedCrop[]
     notifications: Notification[]
     customVegetables: Vegetable[]
+    seedlings: Seedling[]
   }): Promise<void> {
     await Promise.all([
       saveAllToStore('gardens', state.gardens),
       saveAllToStore('crops', state.plantedCrops),
       saveAllToStore('notifications', state.notifications),
       saveAllToStore('customVegetables', state.customVegetables),
+      saveAllToStore('seedlings', state.seedlings),
     ])
   },
 
@@ -327,13 +334,14 @@ export const DB = {
       plantedCrops:     data.plantedCrops     ?? [],
       notifications:    data.notifications    ?? [],
       customVegetables: data.customVegetables ?? [],
+      seedlings:        data.seedlings        ?? [],
     })
   },
 
   async clearAll(): Promise<void> {
     const db = await getDB()
     await Promise.all(
-      (['gardens', 'crops', 'notifications', 'customVegetables'] as const)
+      (['gardens', 'crops', 'notifications', 'customVegetables', 'seedlings'] as const)
         .map(store => db.clear(store))
     )
   },
@@ -355,6 +363,7 @@ export const DB = {
           plantedCrops:     parsed.plantedCrops     ?? [],
           notifications:    parsed.notifications    ?? [],
           customVegetables: parsed.customVegetables ?? [],
+          seedlings:        parsed.seedlings        ?? [],
         })
         localStorage.removeItem(OLD_KEY)
         console.info('[DB] Migración desde localStorage completada.')

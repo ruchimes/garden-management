@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, ChevronRight, StickyNote } from 'lucide-react'
 import { useAppContext } from '../store/AppContext'
 import { VEGETABLES, GROWTH_STAGES, getRotationRecommendation } from '../data/vegetables'
 import StageTimeline from '../components/StageTimeline'
+import SeedlingTray from '../components/SeedlingTray'
 import type { CropFamily, GrowthStage } from '../types'
 
 export default function GardenDetailPage() {
@@ -197,6 +198,9 @@ export default function GardenDetailPage() {
           })}
         </div>
       </section>
+
+      {/* Semillero */}
+      <SeedlingTray />
 
       {/* Planting form modal */}
       {showPlantForm && (
