@@ -21,12 +21,18 @@ const PORT = process.env.PORT ?? 4000
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 const rawOrigins = process.env.ALLOWED_ORIGIN ?? '*'
-const allowedOrigins = rawOrigins === '*'
-  ? '*'
-  : rawOrigins.split(',').map(o => o.trim())
+const allowedOrigins = rawOrigins.split(',').map(o => o.trim())
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    // Permitir peticiones sin origin (curl, Postman, mismo servidor)
+    if (!origin) return callback(null, true)
+    // Permitir si hay un '*' en la lista o el origin está en la lista
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
+    callback(new Error(`CORS: origen no permitido → ${origin}`))
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'X-Api-Secret'],
 }))
