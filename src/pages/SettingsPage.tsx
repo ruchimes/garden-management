@@ -116,12 +116,13 @@ export default function SettingsPage() {
         {hasCloud && syncState.status === 'ok' && (
           <p className="text-xs text-green-700 flex items-center gap-1.5 mt-3">
             <Cloud size={12} />
-            Tus datos se sincronizan automáticamente entre todos tus dispositivos.
+            Tus datos se sincronizan automáticamente con MongoDB Atlas.
           </p>
         )}
         {!hasCloud && (
           <p className="text-xs text-gray-500 mt-3">
-            La app está en modo local. Los datos solo se guardan en este dispositivo.
+            La app está en modo local. Para activar la nube, configura{' '}
+            <code className="bg-gray-100 px-1 rounded">VITE_API_BASE</code> en las variables de entorno.
           </p>
         )}
       </div>

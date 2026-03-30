@@ -1,13 +1,14 @@
 /**
  * database.ts
  * Capa de persistencia usando idb (IndexedDB, ESM nativo) con soporte
- * de sincronización bidireccional con un servidor CouchDB remoto vía REST.
+ * de sincronización bidireccional con MongoDB Atlas a través de la API
+ * serverless en /api/sync (Vercel Functions).
  *
  * Arquitectura:
- *   ┌─────────────┐        ┌─────────────────┐        ┌──────────────┐
- *   │  AppContext │ ←────→ │   database.ts   │ ←────→ │  CouchDB /   │
- *   │  (React)    │        │  idb (IndexedDB)│  sync  │  Cloudant    │
- *   └─────────────┘        └─────────────────┘        └──────────────┘
+ *   ┌─────────────┐        ┌─────────────────┐        ┌──────────────────┐
+ *   │  AppContext │ ←────→ │   database.ts   │ ←────→ │  /api/sync       │
+ *   │  (React)    │        │  idb (IndexedDB)│  sync  │  MongoDB Atlas   │
+ *   └─────────────┘        └─────────────────┘        └──────────────────┘
  */
 
 import { openDB, type IDBPDatabase } from 'idb'
@@ -66,28 +67,29 @@ async function saveAllToStore<T extends { id: string }>(
 }
 
 // ── Configuración de la nube ──────────────────────────────────────────────────
-// Las credenciales vienen de variables de entorno (Vite las inyecta en build).
+// La URL base de la API y el secreto opcional vienen de variables de entorno.
 // En Vercel: Settings → Environment Variables
-// En local: crea un fichero .env.local con estas variables
+// En local:  crea un fichero .env.local con estas variables
 
 export interface CloudConfig {
-  url: string
-  username: string
-  password: string
+  apiBase: string   // URL base de la API, p.ej. "" (mismo origen) o "https://mi-app.vercel.app"
+  secret: string    // Valor de X-Api-Secret (puede estar vacío en dev)
   enabled: boolean
 }
 
 /** Config inyectada en build desde variables de entorno. Nunca va al repo. */
 export function getEnvCloudConfig(): CloudConfig | null {
-  const url  = import.meta.env.VITE_COUCH_URL  as string | undefined
-  const user = import.meta.env.VITE_COUCH_USER as string | undefined
-  const pass = import.meta.env.VITE_COUCH_PASS as string | undefined
-  if (!url || !user || !pass) return null
-  return { url, username: user, password: pass, enabled: true }
+  // VITE_API_BASE puede estar vacío si la API está en el mismo origen (producción en Vercel)
+  const apiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+  const secret  = (import.meta.env.VITE_API_SECRET as string | undefined) ?? ''
+  // Si se define explícitamente VITE_MONGO_ENABLED=false, desactivamos la nube
+  const enabled = import.meta.env.VITE_MONGO_ENABLED !== 'false'
+  if (!enabled) return null
+  return { apiBase, secret, enabled: true }
 }
 
 // Mantenemos también la config manual por localStorage para desarrollo local
-const CLOUD_KEY = 'huerto-cloud-config'
+const CLOUD_KEY = 'huerto-mongo-config'
 
 export function getCloudConfig(): CloudConfig | null {
   // Las variables de entorno tienen prioridad sobre la config manual
@@ -141,96 +143,49 @@ export function getSyncStatus(): SyncState {
   return { ...syncState }
 }
 
-// ── Helpers CouchDB REST ──────────────────────────────────────────────────────
+// ── Helpers API MongoDB ───────────────────────────────────────────────────────
 
-const COUCH_STORES: Array<{ store: keyof HuertoDB; loadKey: string; dbName: string }> = [
-  { store: 'gardens',          loadKey: 'gardens',          dbName: 'huerto_gardens' },
-  { store: 'crops',            loadKey: 'plantedCrops',     dbName: 'huerto_crops' },
-  { store: 'notifications',    loadKey: 'notifications',    dbName: 'huerto_notifications' },
-  { store: 'customVegetables', loadKey: 'customVegetables', dbName: 'huerto_vegetables' },
-  { store: 'seedlings',        loadKey: 'seedlings',        dbName: 'huerto_seedlings' },
+const MONGO_STORES: Array<{ store: keyof HuertoDB; loadKey: string; collection: string }> = [
+  { store: 'gardens',          loadKey: 'gardens',          collection: 'gardens' },
+  { store: 'crops',            loadKey: 'plantedCrops',     collection: 'crops' },
+  { store: 'notifications',    loadKey: 'notifications',    collection: 'notifications' },
+  { store: 'customVegetables', loadKey: 'customVegetables', collection: 'customVegetables' },
+  { store: 'seedlings',        loadKey: 'seedlings',        collection: 'seedlings' },
 ]
 
-function couchHeaders(config: CloudConfig): HeadersInit {
-  const creds = btoa(`${config.username}:${config.password}`)
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Basic ${creds}`,
-  }
+function apiHeaders(config: CloudConfig): HeadersInit {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (config.secret) h['X-Api-Secret'] = config.secret
+  return h
 }
 
-function couchDbUrl(config: CloudConfig, dbName: string): string {
-  return `${config.url.replace(/\/$/, '')}/${dbName}`
+function apiUrl(config: CloudConfig, collection: string): string {
+  const base = config.apiBase.replace(/\/$/, '')
+  return `${base}/api/sync?collection=${collection}`
 }
 
-/** Asegura que la base de datos existe en CouchDB */
-async function ensureRemoteDB(config: CloudConfig, dbName: string): Promise<void> {
-  const url = couchDbUrl(config, dbName)
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: couchHeaders(config),
-  })
-  if (res.status !== 201 && res.status !== 412) {
-    const body = await res.text()
-    throw new Error(`No se pudo crear/verificar DB remota ${dbName}: ${body}`)
-  }
-}
-
-/** Descarga todos los documentos de una BD remota */
-async function fetchAllRemoteDocs<T extends { id: string }>(
+/** Descarga todos los documentos de una colección remota */
+async function fetchRemoteCollection<T>(
   config: CloudConfig,
-  dbName: string
+  collection: string
 ): Promise<T[]> {
-  const url = `${couchDbUrl(config, dbName)}/_all_docs?include_docs=true`
-  const res = await fetch(url, { headers: couchHeaders(config) })
-  if (!res.ok) throw new Error(`Error al leer ${dbName}: ${res.status}`)
-  const data = await res.json()
-  return (data.rows as Array<{ id: string; doc: T & { _id: string; _rev: string } }>)
-    .filter(r => !r.id.startsWith('_design'))
-    .map(({ doc }) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { _id, _rev, ...rest } = doc
-      return rest as unknown as T
-    })
+  const res = await fetch(apiUrl(config, collection), { headers: apiHeaders(config) })
+  if (!res.ok) throw new Error(`Error al leer ${collection}: ${res.status}`)
+  return res.json() as Promise<T[]>
 }
 
-/** Sube todos los documentos locales a la BD remota (bulk) */
-async function pushAllDocs<T extends { id: string }>(
+/** Reemplaza todos los documentos de una colección remota */
+async function pushCollection<T>(
   config: CloudConfig,
-  dbName: string,
+  collection: string,
   items: T[]
 ): Promise<void> {
-  const allDocsUrl = `${couchDbUrl(config, dbName)}/_all_docs`
-  const allDocsRes = await fetch(allDocsUrl, { headers: couchHeaders(config) })
-  const revMap: Record<string, string> = {}
-  if (allDocsRes.ok) {
-    const allDocs = await allDocsRes.json()
-    for (const row of allDocs.rows as Array<{ id: string; value: { rev: string } }>) {
-      revMap[row.id] = row.value.rev
-    }
-  }
-
-  const docs = items.map(item => ({
-    ...item,
-    _id: item.id,
-    ...(revMap[item.id] ? { _rev: revMap[item.id] } : {}),
-  }))
-
-  const localIds = new Set(items.map(i => i.id))
-  const toDelete = Object.entries(revMap)
-    .filter(([id]) => !localIds.has(id) && !id.startsWith('_design'))
-    .map(([id, rev]) => ({ _id: id, _rev: rev, _deleted: true }))
-
-  const allDocs = [...docs, ...toDelete]
-  if (allDocs.length === 0) return
-
-  const bulkUrl = `${couchDbUrl(config, dbName)}/_bulk_docs`
-  const res = await fetch(bulkUrl, {
+  const res = await fetch(apiUrl(config, collection), {
     method: 'POST',
-    headers: couchHeaders(config),
-    body: JSON.stringify({ docs: allDocs }),
+    headers: apiHeaders(config),
+    body: JSON.stringify(items),
   })
-  if (!res.ok) throw new Error(`Error al subir ${dbName}: ${res.status}`)
+  if (!res.ok) throw new Error(`Error al subir ${collection}: ${res.status}`)
 }
 
 // ── API de sincronización ─────────────────────────────────────────────────────
@@ -242,19 +197,20 @@ export async function syncOnce(config: CloudConfig): Promise<void> {
   notifySyncListeners()
 
   try {
-    await Promise.all(COUCH_STORES.map(({ dbName }) => ensureRemoteDB(config, dbName)))
-
     const localData = await DB.loadAll()
     const localDataMap = localData as Record<string, Array<{ id: string }>>
+
+    // Push: sube los datos locales a MongoDB
     await Promise.all(
-      COUCH_STORES.map(({ loadKey, dbName }) =>
-        pushAllDocs(config, dbName, localDataMap[loadKey])
+      MONGO_STORES.map(({ loadKey, collection }) =>
+        pushCollection(config, collection, localDataMap[loadKey])
       )
     )
 
+    // Pull: descarga los datos remotos y actualiza IndexedDB
     const remoteResults = await Promise.all(
-      COUCH_STORES.map(({ store, dbName }) =>
-        fetchAllRemoteDocs<{ id: string }>(config, dbName).then(docs => ({ store, docs }))
+      MONGO_STORES.map(({ store, collection }) =>
+        fetchRemoteCollection<{ id: string }>(config, collection).then(docs => ({ store, docs }))
       )
     )
     for (const { store, docs } of remoteResults) {
@@ -273,7 +229,7 @@ export async function syncOnce(config: CloudConfig): Promise<void> {
 /** Arranca sincronización periódica automática (cada 30s) */
 export function startSync(config: CloudConfig): void {
   stopSync()
-  if (!config.enabled || !config.url) return
+  if (!config.enabled) return
   syncOnce(config)
   syncInterval = setInterval(() => { syncOnce(config) }, 30_000)
 }
@@ -380,7 +336,7 @@ export const DB = {
 // Si las variables de entorno están configuradas, arranca el sync al cargar.
 const _autoConfig = getEnvCloudConfig()
 if (_autoConfig) {
-  console.info('[DB] Sync automático activado con configuración de entorno.')
+  console.info('[DB] Sync automático activado con MongoDB Atlas.')
   startSync(_autoConfig)
 }
 
