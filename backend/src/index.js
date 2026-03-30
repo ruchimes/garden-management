@@ -50,6 +50,7 @@ app.use(express.json({ limit: '2mb' }))
 app.use('/api/sync', (req, res, next) => {
   const secret = process.env.API_SECRET
   if (!secret) return next()                        // sin secreto → sin restricción
+  if (req.method === 'OPTIONS') return next()       // dejar pasar los preflights CORS
   const provided = req.headers['x-api-secret']
   if (provided !== secret) {
     return res.status(401).json({ error: 'No autorizado' })
