@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: huerto-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false   # se rellena manualmente en el dashboard de Render
+      - key: MONGODB_DB
+        value: huerto
+      - key: API_SECRET
+        sync: false   # se rellena manualmente en el dashboard de Render
+      - key: ALLOWED_ORIGIN
+        sync: false   # URL del frontend en Vercel
