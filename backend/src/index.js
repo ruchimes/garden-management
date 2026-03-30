@@ -23,7 +23,7 @@ const PORT = process.env.PORT ?? 4000
 const rawOrigins = process.env.ALLOWED_ORIGIN ?? '*'
 const allowedOrigins = rawOrigins.split(',').map(o => o.trim())
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     // Permitir peticiones sin origin (curl, Postman, mismo servidor)
     if (!origin) return callback(null, true)
@@ -31,11 +31,17 @@ app.use(cors({
     if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       return callback(null, true)
     }
-    callback(new Error(`CORS: origen no permitido → ${origin}`))
+    console.warn(`[CORS] Origen bloqueado: ${origin}`)
+    return callback(null, false)
   },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'X-Api-Secret'],
-}))
+  optionsSuccessStatus: 204,
+}
+
+app.use(cors(corsOptions))
+// Responder explícitamente a todos los preflights
+app.options('*', cors(corsOptions))
 
 // ── Body parser ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '2mb' }))
@@ -62,4 +68,5 @@ app.get('/', (_req, res) =>
 // ── Arranque ──────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[Server] Escuchando en http://localhost:${PORT}`)
+  console.log(`[CORS]   Orígenes permitidos: ${allowedOrigins.join(', ')}`)
 })
